@@ -141,7 +141,8 @@ def Compute_Loss():
     current=pos[18,0]
     target=ti.Vector([0.0,0.0,2.0])
     Loss_Vector=current-target
-    loss_n[None]=0.5*ti.sqrt(Loss_Vector.x**2+Loss_Vector.y**2+Loss_Vector.z**2) #将两个抓取点所在的边的正中间的点定为误差计算对象，布料初始化时，位置为[0.0,0.0,-2.0]对折后目标位置为[0.0,0.0,2.0]
+    loss_n[None]=0.5*ti.sqrt(Loss_Vector.x**2+Loss_Vector.y**2+Loss_Vector.z**2) 
+    #将两个抓取点所在的边的正中间的点定为误差计算对象，布料初始化时，位置为[0.0,0.0,-2.0]对折后目标位置为[0.0,0.0,2.0]
 
 @ti.kernel
 def Vec_Clear(): 
