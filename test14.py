@@ -1,4 +1,3 @@
-from curses import COLOR_RED
 import taichi as ti
 import matplotlib.pyplot as plt
 
@@ -13,7 +12,6 @@ step=1024
 scalar = lambda: ti.field(dtype=ti.f32)
 vec = lambda: ti.Vector.field(3, dtype=ti.f32)
 
-Pos_Pre=vec()
 pos=vec()
 vel=vec()
 F=vec()
@@ -27,7 +25,7 @@ mass=scalar()
 airdamping=scalar()
 z=scalar()
 
-ti.root.dense(ti.ijk,(step,ClothResX+1,ClothResX+1)).place(Pos_Pre,pos,vel,F,acc)
+ti.root.dense(ti.ijk,(step,ClothResX+1,ClothResX+1)).place(pos,vel,F,acc)
 ti.root.dense(ti.i,2).place(KStruct,KShear,KBend)
 ti.root.place(mass,airdamping,loss_n,z)
 ti.root.lazy_grad()
@@ -108,7 +106,7 @@ def Compute_Force(t:ti.i32,i:ti.i32,j:ti.i32):
             Sping_Vector=Spring_Type*ti.Vector([ClothWid/ClothResX,ClothHgt/ClothResX])
             Rest_Length=ti.sqrt(Sping_Vector.x**2+Sping_Vector.y**2) 
             p2=pos[t,Coord_Neigh.x,Coord_Neigh.y]
-            v2=(p2-Pos_Pre[t,Coord_Neigh.x,Coord_Neigh.y])/dt
+            v2=(p2-pos[t-1,Coord_Neigh.x,Coord_Neigh.y])/dt
             deltaV=v1-v2
             deltaP=p1-p2
             dist=ti.sqrt(deltaP.x**2+deltaP.y**2+deltaP.z**2)
@@ -145,7 +143,6 @@ def collision(t:ti.i32,i:ti.i32,j:ti.i32):
 def Reset_Cloth(): 
     for t,i,j in pos:
         pos[t,i,j] = ti.Vector([ClothWid*(i/ClothResX)-ClothWid/2.,0.0,ClothHgt*(j/ClothResX)-ClothHgt/2.0])
-        Pos_Pre[t,i,j]=pos[t,i,j]
         vel[t,i,j]=ti.Vector([0.0,0.0,0.0])
         F[t,i,j]=ti.Vector([0.0,0.0,0.0])
         acc[t,i,j]=ti.Vector([0.0,0.0,0.0]) 
@@ -165,15 +162,12 @@ def Reset_Cloth():
 
 @ti.kernel
 def simulation(t:ti.i32):
-    for i in range(step):
-        for j in range(step):
+    for i in range(ClothResX+1):
+        for j in range(ClothResX+1):
             Compute_Force(t,i,j)
-
             acc[t,i,j]=F[t,i,j]/mass[None]
-            tmp=pos[t,i,j]
-            pos[t,i,j]=pos[t,i,j]*2.0-Pos_Pre[t,i,j]+acc[t,i,j]*dt*dt
-            vel[t,i,j]=(pos[t,i,j]-Pos_Pre[t,i,j])/dt
-            Pos_Pre[t,i,j]=tmp
+            pos[t,i,j]=pos[t,i,j]*2.0-pos[t-1,i,j]+acc[t,i,j]*dt*dt
+            vel[t,i,j]=(pos[t,i,j]-pos[t-1,i,j])/dt
 
             # acc[coord]=F[coord]/mass[None]
             # vel[coord]+=acc[coord]*dt
