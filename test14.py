@@ -1,7 +1,9 @@
+from re import T
+from turtle import update
 import taichi as ti
 import matplotlib.pyplot as plt
 
-ti.init(arch=ti.gpu,device_memory_fraction=0.3)
+ti.init(arch=ti.cuda,device_memory_fraction=0.3)
 
 ImgSize=512
 ClothWid=4.0
@@ -30,27 +32,27 @@ ti.root.dense(ti.i,2).place(KStruct,KShear,KBend)
 ti.root.place(mass,airdamping,loss_n,z)
 ti.root.lazy_grad()
 
-gravity=ti.Vector([0.0,-0.05,0.0])
+gravity=ti.Vector([0.0,-0.0098,0.0])
 # gravity=ti.Vector([0.0,-9.8,0.0])
 a=-0.5
 b=2.0
 dt=0.05
 learning_rate=1.0
 
-KStruct[0]=50.0
-KShear[0]=50.0
-KBend[0]=50.0
-KStruct[1]=0.25
-KShear[1]=0.25
-KBend[1]=0.25
-# KStruct[0]=500.0
-# KShear[0]=500.0
-# KBend[0]=500.0
-# KStruct[1]=0.025
-# KShear[1]=0.025
-# KBend[1]=0.025
+# KStruct[0]=50.0
+# KShear[0]=50.0
+# KBend[0]=50.0
+# KStruct[1]=0.25
+# KShear[1]=0.25
+# KBend[1]=0.25
+KStruct[0]=600.0
+KShear[0]=600.0
+KBend[0]=600.0
+KStruct[1]=2.0
+KShear[1]=2.0
+KBend[1]=2.0
 
-mass[None]=1.0
+mass[None]=10
 # mass[None]=0.1
 airdamping[None]=0.0125
 # airdamping[None]=0.0125
@@ -95,18 +97,17 @@ def Get_Y(n:ti.i32)->ti.i32:
 
 @ti.func
 def Compute_Force(t:ti.i32,i:ti.i32,j:ti.i32):
-    p1=pos[t,i,j]
-    F[t,i,j]=gravity*mass[None]-vel[t,i,j]*airdamping[None]
-    v1=vel[t,i,j]
-
+    p1=pos[t-1,i,j]
+    v1=vel[t-1,i,j]
+    F[t,i,j]= gravity*mass[None]-vel[t-1,i,j]*airdamping[None]
     for n in range(0,12): 
         Spring_Type=ti.Vector([Get_X(n),Get_Y(n)]) 
         Coord_Neigh=Spring_Type + ti.Vector([i,j]) 
         if (Coord_Neigh.x>=0) and (Coord_Neigh.x<=ClothResX) and (Coord_Neigh.y>=0) and (Coord_Neigh.y<=ClothResX): 
             Sping_Vector=Spring_Type*ti.Vector([ClothWid/ClothResX,ClothHgt/ClothResX])
             Rest_Length=ti.sqrt(Sping_Vector.x**2+Sping_Vector.y**2) 
-            p2=pos[t,Coord_Neigh.x,Coord_Neigh.y]
-            v2=(p2-pos[t-1,Coord_Neigh.x,Coord_Neigh.y])/dt
+            p2=pos[t-1,Coord_Neigh.x,Coord_Neigh.y]
+            v2=(p2-pos[t-2,Coord_Neigh.x,Coord_Neigh.y])/dt
             deltaV=v1-v2
             deltaP=p1-p2
             dist=ti.sqrt(deltaP.x**2+deltaP.y**2+deltaP.z**2)
@@ -114,7 +115,6 @@ def Compute_Force(t:ti.i32,i:ti.i32,j:ti.i32):
             AX = 0.0
             BX = 0.0
             if (n<4):
-            # AX=(-KStruct[0]*(dist-Rest_Length)*((deltaP)/dist))
                 AX=-KStruct[0]*(dist-Rest_Length)
                 BX=-KStruct[1]*(deltaV.dot(deltaP)/dist)
             elif (n>=4 and n<8):
@@ -124,14 +124,6 @@ def Compute_Force(t:ti.i32,i:ti.i32,j:ti.i32):
                 AX=-KBend[0]*(dist-Rest_Length)
                 BX=-KBend[1]*(deltaV.dot(deltaP)/dist)
             Sping_Force = deltaP.normalized()*(AX+BX)
-            
-            # if (n<4):
-            #     Sping_Force=(-KStruct[0]*(dist-Rest_Length)*((deltaP)/dist))
-            # elif (n>=4 and n<8):
-            #     Sping_Force=(-KShear[0]*(dist-Rest_Length)*((deltaP)/dist))
-            # else:
-            #     Sping_Force=(-KBend[0]*(dist-Rest_Length)*((deltaP)/dist))
-
             F[t,i,j]+=Sping_Force
     
 @ti.func
@@ -162,48 +154,35 @@ def Reset_Cloth():
 
 @ti.kernel
 def simulation(t:ti.i32):
-    for i in range(ClothResX+1):
-        for j in range(ClothResX+1):
-            Compute_Force(t,i,j)
+    for i,j in ti.ndrange(ClothResX+1,ClothResX+1):
+        Compute_Force(t,i,j)
+
+        if ((i == 0 and j == 0 ) or (i == ClothResX and j == 0 )): 
+            if z[None] <= ClothHgt/2.0:
+                z[None] += (ClothWid/400)
+            else:
+                z[None] = 2.0 
+            y=a*z[None]**2+b
+            x=0.0
+            if i==0:
+                x=-ClothHgt/2.0
+            else:
+                x=ClothHgt/2.0
+            pos[t,i,j]=ti.Vector([x,y,z[None]])
             acc[t,i,j]=F[t,i,j]/mass[None]
-            pos[t,i,j]=pos[t,i,j]*2.0-pos[t-1,i,j]+acc[t,i,j]*dt*dt
             vel[t,i,j]=(pos[t,i,j]-pos[t-1,i,j])/dt
-
-            # acc[coord]=F[coord]/mass[None]
-            # vel[coord]+=acc[coord]*dt
-            # pos[coord]+=vel[coord]*dt
-
-            if ((i == 0 and j == 0 ) or (i == 35 and j == 0 )): 
-                if z[None] <= ClothHgt/2.0:
-                    z[None] += (ClothWid/400)
-                else:
-                    z[None] = 2.0 
-                y=a*z[None]**2+b
-                x=0.0
-                if pos[t,i,j].x <0.0:
-                    x=-ClothHgt/2.0
-                else:
-                    x=ClothHgt/2.0
-                pos[t,i,j]=ti.Vector([x,y,z[None]])
-            # else:                   
-                # acc[coord]=F[coord]/mass[None]
-                # tmp=pos[coord]
-                # pos[coord]=pos[coord]*2.0-Pos_Pre[coord]+acc[coord]*dt*dt
-                # vel[coord]=(pos[coord]-Pos_Pre[coord])/dt
-                # Pos_Pre[coord]=tmp
-
-                # Pos_Pre[coord]=pos[coord]
-                # acc[coord]=F[coord]/mass[None]
-                # vel[coord]+=acc[coord]*dt
-                # pos[coord]+=vel[coord]*dt
-            collision(t,i,j) 
+        else:
+            acc[t,i,j]=F[t,i,j]/mass[None]
+            pos[t,i,j]=pos[t-1,i,j]+acc[t,i,j]*dt**2
+            vel[t,i,j]=(pos[t,i,j]-pos[t-1,i,j])/dt
+        collision(t,i,j) 
 
 @ti.kernel
 def Compute_Loss(t:ti.i32):
     current=pos[t,18,0]
-    target=ti.Vector([0.0,0.0,2.0])
+    target=pos[t,18,35]
     Loss_Vector=current-target
-    loss_n[None]=0.5*ti.sqrt(Loss_Vector.x**2+Loss_Vector.y**2+Loss_Vector.z**2) 
+    loss_n[None]=ti.sqrt(Loss_Vector.x**2+Loss_Vector.y**2+Loss_Vector.z**2) 
 
 @ti.kernel
 def Vec_Clear(): 
@@ -231,71 +210,72 @@ def Grad_Clear():
     Scalar_Clear()
 
 def forward():
-    for t in range(step):
+    for t in range(1,step):
         simulation(t)
     Compute_Loss(step-1)
-
 ##########################################
 @ti.kernel
-def update_verts():
+def update_verts(t:ti.i32):
     for i,j in ti.ndrange(ClothResX, ClothResX):
-        vertices[i*ClothResX+j]=pos[i,j]
+        vertices[i*ClothResX+j]=pos[t,i,j]
 ##########################################
 
 
-def main():
-    Reset_Cloth()
-    forward()
-    Grad_Clear()
-    Reset_Cloth()
-    losses=[]
-    for i in range(step):
-        with ti.ad.Tape(loss=loss_n,clear_gradients=True):
-            forward()
-        print("i=",i,"loss=",loss_n[None])
-        losses.append(loss_n[None])
-        for i in range(2):
-            KStruct[i]-=learning_rate * KStruct.grad[i]
-            KShear[i]-=learning_rate * KShear.grad[i]
-            KBend[i]-=learning_rate * KBend.grad[i]
-    for i in range(2):
-        print("KStruct",KStruct[0])
-        print(KStruct[1])
-        print("KShear",KShear[0])
-        print(KShear[1])
-        print("KBend",KBend[0])
-        print(KBend[1])
+# def main():
+#     Reset_Cloth()
+#     forward()
+#     Grad_Clear()
+#     Reset_Cloth()
+#     losses=[]
+#     for i in range(step):
+#         with ti.ad.Tape(loss=loss_n,clear_gradients=True):
+#             forward()
+#         print("i=",i,"loss=",loss_n[None])
+#         losses.append(loss_n[None])
+#         for i in range(2):
+#             KStruct[i]-=learning_rate * KStruct.grad[i]
+#             KShear[i]-=learning_rate * KShear.grad[i]
+#             KBend[i]-=learning_rate * KBend.grad[i]
+#     for i in range(2):
+#         print("KStruct",KStruct[0])
+#         print(KStruct[1])
+#         print("KShear",KShear[0])
+#         print(KShear[1])
+#         print("KBend",KBend[0])
+#         print(KBend[1])
     
-    fig = plt.gcf()
-    fig.set_size_inches(16, 9)
-    plt.plot(losses)
-    plt.title("loss_change")
-    plt.xlabel("step")
-    plt.ylabel("loss")
-    plt.tight_layout()
-    plt.show()
+#     fig = plt.gcf()
+#     fig.set_size_inches(16, 9)
+#     plt.plot(losses)
+#     plt.title("loss_change")
+#     plt.xlabel("step")
+#     plt.ylabel("loss")
+#     plt.tight_layout()
+#     plt.show()
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
 
 
-
-#####################################
-# Reset_Cloth()
-# ggui=ti.ui.Window('Cloth',(ImgSize,ImgSize),vsync=True)
-# canvas=ggui.get_canvas()
-# scene=ti.ui.Scene()
-# camera=ti.ui.Camera()
-# canvas.set_background_color((1, 1, 1))
-# camera.position(5.0,3.0,5.0)
-# camera.lookat(0.0,0.0,0.0)
-# while ggui.running:
-#     simulation()
-#     update_verts()
-#     scene.mesh(vertices,indices=indices,color=(1.,1.,1.))
-#     scene.point_light(pos=(10.0,10.0,0.0),color=(1.0,1.0,1.0))
-#     camera.track_user_inputs(ggui,movement_speed=0.03,hold_key=ti.ui.LMB)
-#     scene.set_camera(camera)
-#     canvas.scene(scene)
-#     ggui.show()
-#######################################
+####################################
+Reset_Cloth()
+ggui=ti.ui.Window('Cloth',(ImgSize,ImgSize),vsync=True)
+canvas=ggui.get_canvas()
+scene=ti.ui.Scene()
+camera=ti.ui.Camera()
+canvas.set_background_color((1, 1, 1))
+camera.position(5.0,3.0,5.0)
+camera.lookat(0.0,0.0,0.0)
+for i in range(step):
+    simulation(i)
+print("pos",pos[step-1,18,0])
+while ggui.running:
+    for i in range (step):
+        update_verts(i)
+        scene.mesh(vertices,indices=indices,color=(1.,1.,1.))
+        scene.point_light(pos=(10.0,10.0,0.0),color=(1.0,1.0,1.0))
+        camera.track_user_inputs(ggui,movement_speed=0.03,hold_key=ti.ui.LMB)
+        scene.set_camera(camera)
+        canvas.scene(scene)
+        ggui.show()
+######################################
